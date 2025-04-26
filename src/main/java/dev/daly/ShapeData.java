@@ -1,6 +1,6 @@
 package dev.daly;
 
-import java.awt.Color; // Import Color
+import java.awt.Color;
 import java.io.Serial;
 import java.io.Serializable;
 

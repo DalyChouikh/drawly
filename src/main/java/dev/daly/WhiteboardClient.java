@@ -1,21 +1,18 @@
 package dev.daly;
 
 import javax.swing.*;
-import javax.swing.border.EmptyBorder; // Import EmptyBorder
-import javax.swing.event.ListSelectionEvent; // Import ListSelectionEvent
-import javax.swing.event.ListSelectionListener; // Import ListSelectionListener
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.*;
 import java.rmi.Naming;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
-import java.util.Collections; // Import Collections
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class WhiteboardClient implements ClientCallback {
 
-    private static final String SERVER_URL = "//localhost/WhiteboardService";
+    private static final String SERVER_URL = "rmi://localhost/WhiteboardService";
     private JFrame frame;
     private DrawingPanel drawingPanel;
     private WhiteboardServer serverStub;
@@ -42,7 +39,7 @@ public class WhiteboardClient implements ClientCallback {
 
     public WhiteboardClient() {
         // Initialize GUI components
-        frame = new JFrame("Drawly"); // Title will be updated when joining a room
+        frame = new JFrame("Drawly");
         drawingPanel = new DrawingPanel();
         drawingPanel.setPreferredSize(new Dimension(800, 600));
         drawingPanel.setBackground(Color.WHITE);
@@ -54,7 +51,7 @@ public class WhiteboardClient implements ClientCallback {
         JPanel roomPanel = createRoomPanel();
 
         // --- Main Layout ---
-        frame.getContentPane().setLayout(new BorderLayout(5, 5)); // Add gaps
+        frame.getContentPane().setLayout(new BorderLayout(5, 5));
         frame.getContentPane().add(controlPanel, BorderLayout.NORTH);
         frame.getContentPane().add(drawingPanel, BorderLayout.CENTER);
         frame.getContentPane().add(roomPanel, BorderLayout.EAST);
@@ -68,7 +65,7 @@ public class WhiteboardClient implements ClientCallback {
         });
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         frame.pack();
-        frame.setMinimumSize(frame.getSize()); // Prevent resizing smaller than packed
+        frame.setMinimumSize(frame.getSize());
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
 
@@ -145,7 +142,7 @@ public class WhiteboardClient implements ClientCallback {
     private JPanel createRoomPanel() {
         JPanel roomPanel = new JPanel();
         roomPanel.setLayout(new BoxLayout(roomPanel, BoxLayout.Y_AXIS));
-        roomPanel.setBorder(new EmptyBorder(10, 10, 10, 10)); // Add padding
+        roomPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
         currentRoomLabel = new JLabel("Current Room: Not Joined");
         currentRoomLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -156,7 +153,7 @@ public class WhiteboardClient implements ClientCallback {
         roomListModel = new DefaultListModel<>();
         roomList = new JList<>(roomListModel);
         roomList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        roomList.setVisibleRowCount(10); // Show 10 rows
+        roomList.setVisibleRowCount(10);
         // Add listener to update text field when list item is selected
         roomList.addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
@@ -168,9 +165,8 @@ public class WhiteboardClient implements ClientCallback {
         });
         JScrollPane listScroller = new JScrollPane(roomList);
         listScroller.setAlignmentX(Component.LEFT_ALIGNMENT);
-        // Set preferred size for the scroll pane
         listScroller.setPreferredSize(new Dimension(150, 150));
-        listScroller.setMaximumSize(new Dimension(200, 300)); // Limit max size
+        listScroller.setMaximumSize(new Dimension(200, 300));
 
         refreshButton = new JButton("Refresh List");
         refreshButton.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -254,12 +250,12 @@ public class WhiteboardClient implements ClientCallback {
     // Fetches room list from server and updates the JList
     private void fetchAndDisplayRoomList() {
         if (serverStub != null) {
-            new Thread(() -> { // Perform network call off EDT
+            new Thread(() -> {
                 try {
                     System.out.println("Client: Fetching room list...");
                     List<String> rooms = serverStub.getRoomList();
                     System.out.println("Client: Received rooms: " + rooms);
-                    SwingUtilities.invokeLater(() -> { // Update GUI on EDT
+                    SwingUtilities.invokeLater(() -> {
                         roomListModel.clear();
                         if (rooms != null) {
                             for (String room : rooms) {
@@ -282,31 +278,29 @@ public class WhiteboardClient implements ClientCallback {
         }
         if (newRoomName.equals(currentRoomName)) {
             System.out.println("Client: Already in room [" + newRoomName + "].");
-            return; // Already in this room
+            return;
         }
 
         System.out.println("Client: Attempting to switch to room [" + newRoomName + "]...");
-        setDrawingEnabled(false); // Disable controls during switch
+        setDrawingEnabled(false);
 
-        new Thread(() -> { // Perform network calls off EDT
-            // Declare oldRoomName here, accessible by catch blocks
+        new Thread(() -> {
             final String oldRoomName = currentRoomName;
             try {
-                // 1. Unregister from the current room, if any
+                // Unregister from the current room, if any
                 if (oldRoomName != null && clientCallbackStub != null && serverStub != null) {
                     try {
                         System.out.println("Client: Unregistering from room [" + oldRoomName + "]...");
                         serverStub.unregisterClient(clientCallbackStub, oldRoomName);
                         System.out.println("Client: Unregistered from room [" + oldRoomName + "].");
                     } catch (RemoteException e) {
-                        // Log error but continue attempt to join new room
                         System.err.println(
                                 "Client: Error unregistering from room [" + oldRoomName + "]: " + e.getMessage());
                     }
                 }
 
                 // Update state before registering to new room
-                currentRoomName = newRoomName; // Set new room name
+                currentRoomName = newRoomName;
 
                 // Clear local canvas immediately
                 SwingUtilities.invokeLater(() -> {
@@ -316,7 +310,7 @@ public class WhiteboardClient implements ClientCallback {
                     frame.setTitle("Drawly - Room: " + currentRoomName);
                 });
 
-                // 2. Register with the new room
+                // Register with the new room
                 if (serverStub != null && clientCallbackStub != null) {
                     System.out.println("Client: Registering for room [" + currentRoomName + "]...");
                     serverStub.registerClient(clientCallbackStub, currentRoomName);
@@ -326,7 +320,7 @@ public class WhiteboardClient implements ClientCallback {
                     // 3. Enable drawing controls and refresh room list
                     SwingUtilities.invokeLater(() -> {
                         setDrawingEnabled(true);
-                        fetchAndDisplayRoomList(); // Refresh list after joining/creating
+                        fetchAndDisplayRoomList();
                     });
                 }
 
@@ -388,7 +382,7 @@ public class WhiteboardClient implements ClientCallback {
         });
     }
 
-    // --- Drawing Panel Inner Class --- (No changes needed)
+    // --- Drawing Panel Inner Class ---
     private class DrawingPanel extends JPanel {
         @Override
         protected void paintComponent(Graphics g) {

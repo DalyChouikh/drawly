@@ -41,6 +41,8 @@ public class WhiteboardClient implements ClientCallback {
         JLabel sizeLabel = new JLabel("Size: " + currentSize);
         sizeSlider.setPreferredSize(new Dimension(150, sizeSlider.getPreferredSize().height));
 
+        JButton clearButton = new JButton("Clear All"); // Create Clear button
+
         // Color Chooser Action
         colorButton.addActionListener(e -> {
             Color chosenColor = JColorChooser.showDialog(frame, "Select Drawing Color", currentColor);
@@ -56,11 +58,43 @@ public class WhiteboardClient implements ClientCallback {
             sizeLabel.setText("Size: " + currentSize);
         });
 
+        // Clear Button Action
+        clearButton.addActionListener(e -> {
+            if (serverStub != null) {
+                // Ask for confirmation
+                int confirmation = JOptionPane.showConfirmDialog(frame,
+                        "Are you sure you want to clear the entire whiteboard for everyone?",
+                        "Confirm Clear",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE);
+
+                if (confirmation == JOptionPane.YES_OPTION) {
+                    // Call server's clear method in a background thread
+                    new Thread(() -> {
+                        try {
+                            System.out.println("Client: Sending clear request...");
+                            serverStub.clearWhiteboard();
+                            System.out.println("Client: Clear request sent.");
+                            // The actual clearing of the local canvas happens
+                            // when the server calls back the clearCanvas() method.
+                        } catch (RemoteException ex) {
+                            System.err.println("Client: Error sending clear request: " + ex.getMessage());
+                            SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame,
+                                    "Error sending clear command: " + ex.getMessage(), "Communication Error",
+                                    JOptionPane.WARNING_MESSAGE));
+                        }
+                    }).start();
+                }
+            }
+        });
+
         controlPanel.add(colorButton);
         controlPanel.add(colorPreview);
         controlPanel.add(new JLabel("   ")); // Spacer
         controlPanel.add(sizeSlider);
         controlPanel.add(sizeLabel);
+        controlPanel.add(new JLabel("   ")); // Spacer
+        controlPanel.add(clearButton); // Add clear button to panel
         // --- End Control Panel ---
 
         // Add mouse listeners for drawing
@@ -133,6 +167,16 @@ public class WhiteboardClient implements ClientCallback {
         });
     }
 
+    @Override
+    public void clearCanvas() throws RemoteException {
+        // This method is called by the server via RMI to clear the canvas.
+        SwingUtilities.invokeLater(() -> {
+            System.out.println("Client: Received clear command. Clearing canvas.");
+            shapes.clear(); // Clear the local list of shapes
+            drawingPanel.repaint(); // Request redraw of the now empty panel
+        });
+    }
+
     // --- Drawing Panel Inner Class ---
     private class DrawingPanel extends JPanel {
         @Override
@@ -164,11 +208,10 @@ public class WhiteboardClient implements ClientCallback {
                 // Create shape data with current attributes using the appropriate constructor
                 ShapeData shape = new ShapeData(x, y, currentColor, currentSize);
 
-                // OPTIONAL: Add locally immediately for responsiveness.
-                // The shape will be added *again* when broadcast back via updateCanvas.
-                // If initializeCanvas clears the list, this temporary add is okay.
-                // If consistency is paramount, remove this local add and rely solely on server
-                // broadcast.
+                // Add locally immediately for responsiveness.
+                // The shape might be added again if server broadcasted back, but
+                // current server logic prevents that. This ensures the drawing client
+                // sees their drawing immediately.
                 shapes.add(shape);
                 drawingPanel.repaint();
 
@@ -181,11 +224,11 @@ public class WhiteboardClient implements ClientCallback {
                         SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame,
                                 "Error sending drawing data: " + ex.getMessage(), "Communication Error",
                                 JOptionPane.WARNING_MESSAGE));
-                        // Optional: Remove the locally added shape if sending failed?
-                        // SwingUtilities.invokeLater(() -> {
-                        // shapes.remove(shape); // Might be tricky if duplicates exist
-                        // drawingPanel.repaint();
-                        // });
+                        // If sending failed, remove the locally added shape for consistency
+                        SwingUtilities.invokeLater(() -> {
+                            shapes.remove(shape); // Remove the shape we added locally
+                            drawingPanel.repaint(); // Repaint to reflect removal
+                        });
                     }
                 }).start();
             }

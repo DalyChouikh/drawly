@@ -15,8 +15,6 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
     // Use a thread-safe list to store client callbacks
     private final List<ClientCallback> clients;
     private Connection dbConnection; // Database connection
-
-    // Database connection details (replace with your actual details or use config)
     private static final String DB_URL = "jdbc:postgresql://localhost:5432/whiteboard_db"; // Adjust port/db name
     private static final String DB_USER = "postgres"; // Replace with your DB user
     private static final String DB_PASSWORD = "postgres123"; // Replace with your DB password
@@ -124,6 +122,20 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         return loadedShapes;
     }
 
+    private synchronized void clearShapesFromDb() {
+        if (dbConnection == null) {
+            System.err.println("Server: Cannot clear shapes, no database connection.");
+            return;
+        }
+        String sql = "DELETE FROM shapes"; // Deletes all rows
+        try (Statement stmt = dbConnection.createStatement()) {
+            int deletedRows = stmt.executeUpdate(sql);
+            System.out.println("Server: Cleared " + deletedRows + " shapes from database.");
+        } catch (SQLException e) {
+            System.err.println("Server: Error clearing shapes from database: " + e.getMessage());
+        }
+    }
+
     @Override
     public synchronized void registerClient(ClientCallback client) throws RemoteException {
         if (!clients.contains(client)) {
@@ -133,10 +145,10 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
             // Send existing shapes to the new client
             try {
                 List<ShapeData> currentShapes = loadShapesFromDb();
-                if (!currentShapes.isEmpty()) {
-                    client.initializeCanvas(currentShapes); // Use the new callback method
-                    System.out.println("Server: Sent " + currentShapes.size() + " existing shapes to new client.");
-                }
+                // Send initial shapes even if the list is empty, so client clears its canvas
+                client.initializeCanvas(currentShapes);
+                System.out.println("Server: Sent " + currentShapes.size() + " existing shapes to new client.");
+
             } catch (RemoteException e) {
                 System.err
                         .println("Server: Error sending initial shapes to client. Removing client. " + e.getMessage());
@@ -179,6 +191,33 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
                     System.out.println("Server: Client removed due to error. Total clients: " + clients.size());
                 }
             }
+        }
+    }
+
+    @Override
+    public synchronized void clearWhiteboard() throws RemoteException {
+        System.out.println("Server: Received clear request.");
+        // 1. Clear database
+        clearShapesFromDb();
+
+        // 2. Notify all clients to clear their canvas
+        System.out.println("Server: Broadcasting clear command...");
+        List<ClientCallback> clientsToRemove = new ArrayList<>();
+        for (ClientCallback client : clients) {
+            try {
+                client.clearCanvas(); // Call the new callback method
+            } catch (RemoteException e) {
+                System.err.println("Server: Error calling clearCanvas on client. Removing client. " + e.getMessage());
+                // Don't remove directly while iterating over CopyOnWriteArrayList, collect and
+                // remove after
+                clientsToRemove.add(client);
+            }
+        }
+        // Remove clients that failed during broadcast
+        if (!clientsToRemove.isEmpty()) {
+            clients.removeAll(clientsToRemove);
+            System.out.println("Server: Removed " + clientsToRemove.size()
+                    + " clients due to clearCanvas error. Total clients: " + clients.size());
         }
     }
 

@@ -11,4 +11,7 @@ public interface ClientCallback extends Remote {
 
     // Method the server calls to send the initial state of the canvas
     void initializeCanvas(List<ShapeData> initialShapes) throws RemoteException;
+
+    // Method the server calls to tell the client to clear its canvas
+    void clearCanvas() throws RemoteException;
 }

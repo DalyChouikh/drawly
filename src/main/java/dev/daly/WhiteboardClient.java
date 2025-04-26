@@ -16,12 +16,7 @@ public class WhiteboardClient implements ClientCallback {
     private DrawingPanel drawingPanel;
     private WhiteboardServer serverStub;
     private ClientCallback clientCallbackStub; // Stub for *this* client object
-
-    // Store shapes to be drawn. Use a thread-safe list because updates
-    // can come from the RMI thread.
     private final List<ShapeData> shapes = new CopyOnWriteArrayList<>();
-
-    // Current drawing attributes
     private Color currentColor = Color.BLACK;
     private int currentSize = 4;
     private JLabel colorPreview; // To show selected color
@@ -102,6 +97,7 @@ public class WhiteboardClient implements ClientCallback {
             serverStub = (WhiteboardServer) Naming.lookup(SERVER_URL);
 
             // Register this client with the server
+            // The server will now call initializeCanvas upon successful registration
             serverStub.registerClient(clientCallbackStub);
 
             System.out.println("Client: Connected to server and registered.");
@@ -109,7 +105,8 @@ public class WhiteboardClient implements ClientCallback {
         } catch (Exception e) {
             System.err.println("Client connection error: " + e.toString());
             e.printStackTrace();
-            JOptionPane.showMessageDialog(frame, "Error connecting to server: " + e.getMessage(), "Connection Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(frame, "Error connecting to server: " + e.getMessage(), "Connection Error",
+                    JOptionPane.ERROR_MESSAGE);
             // Optionally exit or disable drawing features
             shutdown(); // Clean up if connection fails
         }
@@ -118,11 +115,21 @@ public class WhiteboardClient implements ClientCallback {
     // --- ClientCallback Implementation ---
     @Override
     public void updateCanvas(ShapeData shape) throws RemoteException {
-        // This method is called by an RMI thread.
-        // Use SwingUtilities.invokeLater to safely update the GUI from the Event Dispatch Thread (EDT).
+        // This method is called by an RMI thread when a *new* shape is broadcasted.
         SwingUtilities.invokeLater(() -> {
-            shapes.add(shape);      // Add shape to our list
+            shapes.add(shape); // Add the single new shape
             drawingPanel.repaint(); // Request redraw
+        });
+    }
+
+    @Override
+    public void initializeCanvas(List<ShapeData> initialShapes) throws RemoteException {
+        // This method is called by the server *once* after registration.
+        SwingUtilities.invokeLater(() -> {
+            System.out.println("Client: Receiving initial shapes: " + initialShapes.size());
+            shapes.clear(); // Clear any existing local shapes
+            shapes.addAll(initialShapes); // Add all shapes received from the server
+            drawingPanel.repaint(); // Redraw the canvas with the initial state
         });
     }
 
@@ -132,19 +139,16 @@ public class WhiteboardClient implements ClientCallback {
         protected void paintComponent(Graphics g) {
             super.paintComponent(g); // Clears the panel
             Graphics2D g2d = (Graphics2D) g;
-            // Improve rendering quality
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
             // Draw all stored shapes using their specific attributes
             for (ShapeData shape : shapes) {
-                g2d.setColor(shape.color); // Set color from shape data
-                // Draw an oval centered at (x, y) with the shape's size
+                g2d.setColor(shape.getColor()); // Use the getColor() helper method
                 g2d.fillOval(
-                    (int) (shape.x - shape.size / 2.0),
-                    (int) (shape.y - shape.size / 2.0),
-                    shape.size,
-                    shape.size
-                );
+                        (int) (shape.x - shape.size / 2.0),
+                        (int) (shape.y - shape.size / 2.0),
+                        shape.size,
+                        shape.size);
             }
         }
     }
@@ -157,25 +161,31 @@ public class WhiteboardClient implements ClientCallback {
                 double x = e.getX();
                 double y = e.getY();
 
-                // Create shape data with current attributes
-                ShapeData shape = new ShapeData(x, y, currentColor, currentSize); // Use current color and size
+                // Create shape data with current attributes using the appropriate constructor
+                ShapeData shape = new ShapeData(x, y, currentColor, currentSize);
 
-                // Add locally and repaint immediately for responsiveness
+                // OPTIONAL: Add locally immediately for responsiveness.
+                // The shape will be added *again* when broadcast back via updateCanvas.
+                // If initializeCanvas clears the list, this temporary add is okay.
+                // If consistency is paramount, remove this local add and rely solely on server
+                // broadcast.
                 shapes.add(shape);
                 drawingPanel.repaint();
 
                 // Send shape data to the server in a background thread
-                // to avoid blocking the EDT
                 new Thread(() -> {
                     try {
-                        // Pass our own callback stub so server doesn't send it back to us
                         serverStub.publishShape(shape, clientCallbackStub);
                     } catch (RemoteException ex) {
                         System.err.println("Client: Error sending shape: " + ex.getMessage());
-                        // Handle server communication error (e.g., show message)
-                        SwingUtilities.invokeLater(() ->
-                            JOptionPane.showMessageDialog(frame, "Error sending drawing data: " + ex.getMessage(), "Communication Error", JOptionPane.WARNING_MESSAGE)
-                        );
+                        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame,
+                                "Error sending drawing data: " + ex.getMessage(), "Communication Error",
+                                JOptionPane.WARNING_MESSAGE));
+                        // Optional: Remove the locally added shape if sending failed?
+                        // SwingUtilities.invokeLater(() -> {
+                        // shapes.remove(shape); // Might be tricky if duplicates exist
+                        // drawingPanel.repaint();
+                        // });
                     }
                 }).start();
             }
@@ -191,9 +201,9 @@ public class WhiteboardClient implements ClientCallback {
             handleMouseEvent(e);
         }
 
-        // Need to implement all methods from MouseMotionListener
         @Override
-        public void mouseMoved(MouseEvent e) { } // Not used
+        public void mouseMoved(MouseEvent e) {
+        } // Not used
     }
 
     // --- Shutdown Handling ---

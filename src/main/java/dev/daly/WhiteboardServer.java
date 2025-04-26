@@ -2,6 +2,7 @@ package dev.daly;
 
 import java.rmi.Remote;
 import java.rmi.RemoteException;
+import java.util.List; // Import List
 
 // Interface defining the methods the server provides
 public interface WhiteboardServer extends Remote {
@@ -16,4 +17,7 @@ public interface WhiteboardServer extends Remote {
 
     // Client calls this to clear a specific room's whiteboard
     void clearWhiteboard(String roomName) throws RemoteException;
+
+    // Get a list of currently active room names
+    List<String> getRoomList() throws RemoteException;
 }

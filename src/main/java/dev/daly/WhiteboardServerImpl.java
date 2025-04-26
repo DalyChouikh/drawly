@@ -7,10 +7,12 @@ import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Collections; // Import Collections
 import java.util.List;
-import java.util.Map; // Import Map
-import java.util.concurrent.ConcurrentHashMap; // Thread-safe map
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
 
 public class WhiteboardServerImpl extends UnicastRemoteObject implements WhiteboardServer {
 
@@ -23,7 +25,7 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
 
     protected WhiteboardServerImpl() throws RemoteException {
         super();
-        roomClients = new ConcurrentHashMap<>(); // Use a thread-safe map implementation
+        roomClients = new ConcurrentHashMap<>();
         connectToDatabase();
     }
 
@@ -172,7 +174,7 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
                         + "]. Removing client. " + e.getMessage());
                 clientsInRoom.remove(client); // Remove if initial send fails
                 if (clientsInRoom.isEmpty()) {
-                    roomClients.remove(roomName); // Clean up empty room entry
+                    roomClients.remove(roomName); // Clean up empty room entry if no other clients are left
                 }
                 System.out.println("Server: Client removed due to initialization error. Total clients in room ["
                         + roomName + "]: " + (clientsInRoom.isEmpty() ? 0 : clientsInRoom.size()));
@@ -189,15 +191,17 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
             if (clientsInRoom.remove(client)) {
                 System.out.println("Server: Client unregistered from room [" + roomName + "]. Total clients in room: "
                         + clientsInRoom.size());
+                // Only remove the room from the map if no clients are left *in memory*
                 if (clientsInRoom.isEmpty()) {
-                    roomClients.remove(roomName); // Clean up empty room entry
-                    System.out.println("Server: Room [" + roomName + "] is now empty and removed.");
+                    roomClients.remove(roomName);
+                    System.out.println(
+                            "Server: Room [" + roomName + "] is now empty in memory and removed from active map.");
                 }
             } else {
                 System.out.println("Server: Client not found in room [" + roomName + "] for unregistration.");
             }
         } else {
-            System.out.println("Server: Room [" + roomName + "] not found for unregistration.");
+            System.out.println("Server: Room [" + roomName + "] not found in active map for unregistration.");
         }
     }
 
@@ -207,7 +211,7 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         // 1. Save shape to database with room name
         saveShapeToDb(shape, roomName);
 
-        // 2. Broadcast only to clients in the same room
+        // 2. Broadcast only to clients currently connected to the same room
         CopyOnWriteArrayList<ClientCallback> clientsInRoom = roomClients.get(roomName);
         if (clientsInRoom != null) {
             System.out.println(
@@ -224,14 +228,15 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
                         System.out.println("Server: Client removed due to error. Total clients in room [" + roomName
                                 + "]: " + clientsInRoom.size());
                         if (clientsInRoom.isEmpty()) {
-                            roomClients.remove(roomName); // Clean up empty room entry
-                            System.out.println("Server: Room [" + roomName + "] is now empty and removed.");
+                            roomClients.remove(roomName); // Clean up empty room entry if no other clients are left
+                            System.out.println("Server: Room [" + roomName
+                                    + "] is now empty in memory and removed from active map.");
                         }
                     }
                 }
             }
         } else {
-            System.out.println("Server: No clients found in room [" + roomName + "] to broadcast shape.");
+            System.out.println("Server: No active clients found in room [" + roomName + "] to broadcast shape.");
         }
     }
 
@@ -241,7 +246,8 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         // 1. Clear database for the specific room
         clearShapesFromDb(roomName);
 
-        // 2. Notify all clients *in that room* to clear their canvas
+        // 2. Notify all clients *currently connected to that room* to clear their
+        // canvas
         CopyOnWriteArrayList<ClientCallback> clientsInRoom = roomClients.get(roomName);
         if (clientsInRoom != null) {
             System.out.println("Server: Broadcasting clear command to room [" + roomName + "] (" + clientsInRoom.size()
@@ -262,13 +268,45 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
                 System.out.println("Server: Removed " + clientsToRemove.size() + " clients from room [" + roomName
                         + "] due to clearCanvas error. Total clients in room: " + clientsInRoom.size());
                 if (clientsInRoom.isEmpty()) {
-                    roomClients.remove(roomName); // Clean up empty room entry
-                    System.out.println("Server: Room [" + roomName + "] is now empty and removed.");
+                    roomClients.remove(roomName); // Clean up empty room entry if no other clients are left
+                    System.out.println(
+                            "Server: Room [" + roomName + "] is now empty in memory and removed from active map.");
                 }
             }
         } else {
-            System.out.println("Server: No clients found in room [" + roomName + "] to broadcast clear command.");
+            System.out
+                    .println("Server: No active clients found in room [" + roomName + "] to broadcast clear command.");
         }
+    }
+
+    @Override
+    public List<String> getRoomList() throws RemoteException {
+        System.out.println("Server: getRoomList called. Querying database...");
+        List<String> dbRooms = new ArrayList<>();
+        if (dbConnection == null) {
+            System.err.println("Server: Cannot get room list, no database connection.");
+            // Optionally throw exception or return empty list based on desired behavior
+            // throw new RemoteException("Database connection unavailable");
+            return dbRooms; // Return empty list if DB connection failed
+        }
+
+        // Query distinct room names from the shapes table
+        String sql = "SELECT DISTINCT room_name FROM shapes ORDER BY room_name ASC";
+        try (Statement stmt = dbConnection.createStatement();
+                ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                dbRooms.add(rs.getString("room_name"));
+            }
+            System.out.println("Server: Found " + dbRooms.size() + " distinct rooms in database.");
+        } catch (SQLException e) {
+            System.err.println("Server: Error querying distinct room names from database: " + e.getMessage());
+            // Depending on requirements, you might want to re-throw this as a
+            // RemoteException
+            // throw new RemoteException("Error accessing room data", e);
+            return Collections.emptyList(); // Return empty list on DB error
+        }
+        return dbRooms;
     }
 
     public static void main(String[] args) {

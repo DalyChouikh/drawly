@@ -21,18 +21,59 @@ public class WhiteboardClient implements ClientCallback {
     // can come from the RMI thread.
     private final List<ShapeData> shapes = new CopyOnWriteArrayList<>();
 
+    // Current drawing attributes
+    private Color currentColor = Color.BLACK;
+    private int currentSize = 4;
+    private JLabel colorPreview; // To show selected color
+
     public WhiteboardClient() {
         // Initialize GUI components
-        frame = new JFrame("Shared Whiteboard Client (Swing)");
+        frame = new JFrame("Drawly");
         drawingPanel = new DrawingPanel();
         drawingPanel.setPreferredSize(new Dimension(800, 600));
         drawingPanel.setBackground(Color.WHITE);
+
+        // --- Control Panel ---
+        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton colorButton = new JButton("Choose Color");
+        colorPreview = new JLabel("  "); // Small label to show color
+        colorPreview.setOpaque(true);
+        colorPreview.setBackground(currentColor);
+        colorPreview.setPreferredSize(new Dimension(20, 20));
+        colorPreview.setBorder(BorderFactory.createLineBorder(Color.DARK_GRAY));
+
+        JSlider sizeSlider = new JSlider(JSlider.HORIZONTAL, 1, 50, currentSize);
+        JLabel sizeLabel = new JLabel("Size: " + currentSize);
+        sizeSlider.setPreferredSize(new Dimension(150, sizeSlider.getPreferredSize().height));
+
+        // Color Chooser Action
+        colorButton.addActionListener(e -> {
+            Color chosenColor = JColorChooser.showDialog(frame, "Select Drawing Color", currentColor);
+            if (chosenColor != null) {
+                currentColor = chosenColor;
+                colorPreview.setBackground(currentColor); // Update preview
+            }
+        });
+
+        // Size Slider Action
+        sizeSlider.addChangeListener(e -> {
+            currentSize = sizeSlider.getValue();
+            sizeLabel.setText("Size: " + currentSize);
+        });
+
+        controlPanel.add(colorButton);
+        controlPanel.add(colorPreview);
+        controlPanel.add(new JLabel("   ")); // Spacer
+        controlPanel.add(sizeSlider);
+        controlPanel.add(sizeLabel);
+        // --- End Control Panel ---
 
         // Add mouse listeners for drawing
         DrawingMouseListener mouseListener = new DrawingMouseListener();
         drawingPanel.addMouseListener(mouseListener);
         drawingPanel.addMouseMotionListener(mouseListener);
 
+        frame.getContentPane().add(controlPanel, BorderLayout.NORTH); // Add controls at the top
         frame.getContentPane().add(drawingPanel, BorderLayout.CENTER);
 
         // Handle window closing
@@ -80,7 +121,6 @@ public class WhiteboardClient implements ClientCallback {
         // This method is called by an RMI thread.
         // Use SwingUtilities.invokeLater to safely update the GUI from the Event Dispatch Thread (EDT).
         SwingUtilities.invokeLater(() -> {
-            System.out.println("Client: Received shape update from server.");
             shapes.add(shape);      // Add shape to our list
             drawingPanel.repaint(); // Request redraw
         });
@@ -92,21 +132,20 @@ public class WhiteboardClient implements ClientCallback {
         protected void paintComponent(Graphics g) {
             super.paintComponent(g); // Clears the panel
             Graphics2D g2d = (Graphics2D) g;
-            g2d.setColor(Color.BLACK); // Set drawing color
             // Improve rendering quality
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-            // Draw all stored shapes
+            // Draw all stored shapes using their specific attributes
             for (ShapeData shape : shapes) {
-                drawPoint(g2d, shape.x, shape.y);
+                g2d.setColor(shape.color); // Set color from shape data
+                // Draw an oval centered at (x, y) with the shape's size
+                g2d.fillOval(
+                    (int) (shape.x - shape.size / 2.0),
+                    (int) (shape.y - shape.size / 2.0),
+                    shape.size,
+                    shape.size
+                );
             }
-        }
-
-        // Helper method to draw a point (small circle)
-        private void drawPoint(Graphics2D g2d, double x, double y) {
-            int size = 4;
-            // Cast double coordinates to int for drawing
-            g2d.fillOval((int) (x - size / 2.0), (int) (y - size / 2.0), size, size);
         }
     }
 
@@ -118,8 +157,8 @@ public class WhiteboardClient implements ClientCallback {
                 double x = e.getX();
                 double y = e.getY();
 
-                // Create shape data
-                ShapeData shape = new ShapeData(x, y);
+                // Create shape data with current attributes
+                ShapeData shape = new ShapeData(x, y, currentColor, currentSize); // Use current color and size
 
                 // Add locally and repaint immediately for responsiveness
                 shapes.add(shape);
@@ -156,7 +195,6 @@ public class WhiteboardClient implements ClientCallback {
         @Override
         public void mouseMoved(MouseEvent e) { } // Not used
     }
-
 
     // --- Shutdown Handling ---
     private void shutdown() {

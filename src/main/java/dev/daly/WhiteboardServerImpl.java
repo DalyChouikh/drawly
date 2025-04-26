@@ -1,5 +1,6 @@
 package dev.daly;
 
+import java.awt.Color;
 import java.rmi.Naming;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -143,6 +144,27 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         }
     }
 
+
+    // Helper method to check if a room exists in the database
+    private synchronized boolean doesRoomExistInDb(String roomName) {
+        if (dbConnection == null) {
+            System.err.println("Server: Cannot check room existence, no database connection.");
+            return false;
+        }
+        String sql = "SELECT COUNT(*) FROM shapes WHERE room_name = ?";
+        try (PreparedStatement pstmt = dbConnection.prepareStatement(sql)) {
+            pstmt.setString(1, roomName);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt(1) > 0;
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Server: Error checking existence of room [" + roomName + "] in database: " + e.getMessage());
+        }
+        return false;
+    }
+
     @Override
     public synchronized void registerClient(ClientCallback client, String roomName) throws RemoteException {
         // Get or create the list for the room
@@ -154,7 +176,15 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
             System.out.println("Server: Client registered for room [" + roomName + "]. Total clients in room: "
                     + clientsInRoom.size());
 
-            // Send existing shapes for *this room* to the new client
+            // Check if room exists in DB, if not, add a dummy shape
+            if (!doesRoomExistInDb(roomName)) {
+                System.out.println("Server: Room [" + roomName + "] not found in DB. Adding initial dummy shape.");
+                // Create a dummy shape (white, small, at origin)
+                ShapeData dummyShape = new ShapeData(0, 0, Color.WHITE, 1);
+                saveShapeToDb(dummyShape, roomName);
+            }
+
+            // Send existing shapes (including the dummy one if just added)
             try {
                 List<ShapeData> currentShapes = loadShapesFromDb(roomName);
                 client.initializeCanvas(currentShapes); // Send initial state for the room

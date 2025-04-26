@@ -7,12 +7,11 @@ import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.sql.*;
 import java.util.ArrayList;
-import java.util.Collections; // Import Collections
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.stream.Collectors;
 
 public class WhiteboardServerImpl extends UnicastRemoteObject implements WhiteboardServer {
 
@@ -31,23 +30,22 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
 
     private void connectToDatabase() {
         try {
+            //Class.forName("org.postgresql.Driver");
             dbConnection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
             System.out.println("Server: Database connection established.");
-            createShapesTableIfNotExists(); // Ensure table includes room_name
+            createShapesTableIfNotExists();
         } catch (SQLException e) {
             System.err.println("Server: Database connection failed: " + e.getMessage());
             dbConnection = null;
         }
     }
 
-    // Updated to include room_name
     private void createShapesTableIfNotExists() {
         if (dbConnection == null)
             return;
-        // Added room_name column
         String createTableSQL = "CREATE TABLE IF NOT EXISTS shapes (" +
                 "shape_id SERIAL PRIMARY KEY, " +
-                "room_name VARCHAR(255) NOT NULL, " + // Added room identifier
+                "room_name VARCHAR(255) NOT NULL, " +
                 "x_coord DOUBLE PRECISION NOT NULL, " +
                 "y_coord DOUBLE PRECISION NOT NULL, " +
                 "color_r INTEGER NOT NULL, " +
@@ -79,13 +77,11 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         }
     }
 
-    // Updated to include roomName
     private synchronized void saveShapeToDb(ShapeData shape, String roomName) {
         if (dbConnection == null) {
             System.err.println("Server: Cannot save shape, no database connection.");
             return;
         }
-        // Added room_name to insert
         String sql = "INSERT INTO shapes (room_name, x_coord, y_coord, color_r, color_g, color_b, size) VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement pstmt = dbConnection.prepareStatement(sql)) {
             pstmt.setString(1, roomName); // Set room name
@@ -101,17 +97,15 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         }
     }
 
-    // Updated to load shapes for a specific roomName
     private synchronized List<ShapeData> loadShapesFromDb(String roomName) {
         List<ShapeData> loadedShapes = new ArrayList<>();
         if (dbConnection == null) {
             System.err.println("Server: Cannot load shapes, no database connection.");
             return loadedShapes;
         }
-        // Added WHERE clause for room_name
         String sql = "SELECT x_coord, y_coord, color_r, color_g, color_b, size FROM shapes WHERE room_name = ? ORDER BY created_at ASC";
         try (PreparedStatement pstmt = dbConnection.prepareStatement(sql)) {
-            pstmt.setString(1, roomName); // Set the room name parameter
+            pstmt.setString(1, roomName);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     ShapeData shape = new ShapeData(
@@ -133,13 +127,11 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         return loadedShapes;
     }
 
-    // Updated to clear shapes for a specific roomName
     private synchronized void clearShapesFromDb(String roomName) {
         if (dbConnection == null) {
             System.err.println("Server: Cannot clear shapes, no database connection.");
             return;
         }
-        // Added WHERE clause for room_name
         String sql = "DELETE FROM shapes WHERE room_name = ?";
         try (PreparedStatement pstmt = dbConnection.prepareStatement(sql)) {
             pstmt.setString(1, roomName); // Set the room name parameter
@@ -208,10 +200,10 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
     @Override
     public void publishShape(ShapeData shape, ClientCallback sender, String roomName) throws RemoteException {
         System.out.println("Server: Received shape from a client for room [" + roomName + "].");
-        // 1. Save shape to database with room name
+        // Save shape to database with room name
         saveShapeToDb(shape, roomName);
 
-        // 2. Broadcast only to clients currently connected to the same room
+        // Broadcast only to clients currently connected to the same room
         CopyOnWriteArrayList<ClientCallback> clientsInRoom = roomClients.get(roomName);
         if (clientsInRoom != null) {
             System.out.println(
@@ -243,11 +235,10 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
     @Override
     public synchronized void clearWhiteboard(String roomName) throws RemoteException {
         System.out.println("Server: Received clear request for room [" + roomName + "].");
-        // 1. Clear database for the specific room
+        // Clear database for the specific room
         clearShapesFromDb(roomName);
 
-        // 2. Notify all clients *currently connected to that room* to clear their
-        // canvas
+        // Notify all clients *currently connected to that room* to clear their canvas
         CopyOnWriteArrayList<ClientCallback> clientsInRoom = roomClients.get(roomName);
         if (clientsInRoom != null) {
             System.out.println("Server: Broadcasting clear command to room [" + roomName + "] (" + clientsInRoom.size()
@@ -285,7 +276,6 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         List<String> dbRooms = new ArrayList<>();
         if (dbConnection == null) {
             System.err.println("Server: Cannot get room list, no database connection.");
-            // Optionally throw exception or return empty list based on desired behavior
             // throw new RemoteException("Database connection unavailable");
             return dbRooms; // Return empty list if DB connection failed
         }
@@ -301,8 +291,6 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
             System.out.println("Server: Found " + dbRooms.size() + " distinct rooms in database.");
         } catch (SQLException e) {
             System.err.println("Server: Error querying distinct room names from database: " + e.getMessage());
-            // Depending on requirements, you might want to re-throw this as a
-            // RemoteException
             // throw new RemoteException("Error accessing room data", e);
             return Collections.emptyList(); // Return empty list on DB error
         }
@@ -312,7 +300,7 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
     public static void main(String[] args) {
         WhiteboardServerImpl server = null;
         try {
-            // 1. Create the server implementation
+            // Create the server implementation
             server = new WhiteboardServerImpl();
             final WhiteboardServerImpl finalServer = server; // For use in shutdown hook
 
@@ -324,8 +312,7 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
                 }
             }));
 
-            // 2. Start the RMI Registry
-            // Try to create a registry, or get it if it already exists
+            // Start the RMI Registry
             Registry registry;
             try {
                 registry = LocateRegistry.createRegistry(1099);
@@ -335,9 +322,9 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
                 registry = LocateRegistry.getRegistry(1099);
             }
 
-            // 3. Bind the server implementation to the registry
+            // Bind the server implementation to the registry
             // Use Naming.rebind to overwrite any existing binding
-            Naming.rebind("//localhost/WhiteboardService", server); // Use localhost or specific IP/hostname
+            Naming.rebind("rmi://localhost/WhiteboardService", server);
 
             System.out.println("Server: WhiteboardService bound in registry.");
             System.out.println("Server: Ready.");

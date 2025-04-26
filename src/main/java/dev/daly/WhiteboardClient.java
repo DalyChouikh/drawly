@@ -7,23 +7,33 @@ import java.rmi.Naming;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList; // Thread-safe list for shapes
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class WhiteboardClient implements ClientCallback {
 
-    private static final String SERVER_URL = "//localhost/WhiteboardService"; // Or server IP/hostname
+    private static final String SERVER_URL = "//localhost/WhiteboardService";
     private JFrame frame;
     private DrawingPanel drawingPanel;
     private WhiteboardServer serverStub;
-    private ClientCallback clientCallbackStub; // Stub for *this* client object
+    private ClientCallback clientCallbackStub;
     private final List<ShapeData> shapes = new CopyOnWriteArrayList<>();
     private Color currentColor = Color.BLACK;
     private int currentSize = 4;
-    private JLabel colorPreview; // To show selected color
+    private JLabel colorPreview;
+    private String roomName; // Added to store the current room name
 
     public WhiteboardClient() {
+        // Prompt for Room Name *before* creating the main frame
+        this.roomName = promptForRoomName();
+        if (this.roomName == null || this.roomName.trim().isEmpty()) {
+            JOptionPane.showMessageDialog(null, "A valid room name is required to start.", "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            System.exit(1); // Exit if no valid room name is provided
+        }
+
         // Initialize GUI components
-        frame = new JFrame("Drawly");
+        frame = new JFrame("Drawly - Room: " + roomName); // Show room name in title
+        // ... rest of GUI setup ...
         drawingPanel = new DrawingPanel();
         drawingPanel.setPreferredSize(new Dimension(800, 600));
         drawingPanel.setBackground(Color.WHITE);
@@ -41,7 +51,7 @@ public class WhiteboardClient implements ClientCallback {
         JLabel sizeLabel = new JLabel("Size: " + currentSize);
         sizeSlider.setPreferredSize(new Dimension(150, sizeSlider.getPreferredSize().height));
 
-        JButton clearButton = new JButton("Clear All"); // Create Clear button
+        JButton clearButton = new JButton("Clear Room"); // Changed button text
 
         // Color Chooser Action
         colorButton.addActionListener(e -> {
@@ -58,27 +68,24 @@ public class WhiteboardClient implements ClientCallback {
             sizeLabel.setText("Size: " + currentSize);
         });
 
-        // Clear Button Action
+        // Clear Button Action - Pass roomName
         clearButton.addActionListener(e -> {
             if (serverStub != null) {
-                // Ask for confirmation
                 int confirmation = JOptionPane.showConfirmDialog(frame,
-                        "Are you sure you want to clear the entire whiteboard for everyone?",
-                        "Confirm Clear",
+                        "Are you sure you want to clear the whiteboard for room '" + roomName + "'?", // Updated message
+                        "Confirm Clear Room", // Updated title
                         JOptionPane.YES_NO_OPTION,
                         JOptionPane.WARNING_MESSAGE);
 
                 if (confirmation == JOptionPane.YES_OPTION) {
-                    // Call server's clear method in a background thread
                     new Thread(() -> {
                         try {
-                            System.out.println("Client: Sending clear request...");
-                            serverStub.clearWhiteboard();
-                            System.out.println("Client: Clear request sent.");
-                            // The actual clearing of the local canvas happens
-                            // when the server calls back the clearCanvas() method.
+                            System.out.println("Client: Sending clear request for room [" + roomName + "]...");
+                            serverStub.clearWhiteboard(roomName); // Pass roomName
+                            System.out.println("Client: Clear request sent for room [" + roomName + "].");
                         } catch (RemoteException ex) {
-                            System.err.println("Client: Error sending clear request: " + ex.getMessage());
+                            System.err.println("Client: Error sending clear request for room [" + roomName + "]: "
+                                    + ex.getMessage());
                             SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame,
                                     "Error sending clear command: " + ex.getMessage(), "Communication Error",
                                     JOptionPane.WARNING_MESSAGE));
@@ -94,18 +101,17 @@ public class WhiteboardClient implements ClientCallback {
         controlPanel.add(sizeSlider);
         controlPanel.add(sizeLabel);
         controlPanel.add(new JLabel("   ")); // Spacer
-        controlPanel.add(clearButton); // Add clear button to panel
+        controlPanel.add(clearButton);
         // --- End Control Panel ---
 
-        // Add mouse listeners for drawing
+        // ... rest of constructor ...
         DrawingMouseListener mouseListener = new DrawingMouseListener();
         drawingPanel.addMouseListener(mouseListener);
         drawingPanel.addMouseMotionListener(mouseListener);
 
-        frame.getContentPane().add(controlPanel, BorderLayout.NORTH); // Add controls at the top
+        frame.getContentPane().add(controlPanel, BorderLayout.NORTH);
         frame.getContentPane().add(drawingPanel, BorderLayout.CENTER);
 
-        // Handle window closing
         frame.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -113,40 +119,54 @@ public class WhiteboardClient implements ClientCallback {
             }
         });
 
-        frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE); // We handle close manually
+        frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         frame.pack();
-        frame.setLocationRelativeTo(null); // Center the window
+        frame.setLocationRelativeTo(null);
         frame.setVisible(true);
 
-        // Connect to RMI server
+        // Connect to RMI server (now happens after getting room name)
         connectToServer();
     }
 
+    // Helper method to prompt for room name
+    private String promptForRoomName() {
+        return JOptionPane.showInputDialog(
+                null, // Parent component
+                "Enter Room Name:", // Message
+                "Join Room", // Title
+                JOptionPane.PLAIN_MESSAGE // Message type
+        );
+    }
+
+    // Modified to pass roomName during registration
     private void connectToServer() {
+        if (roomName == null || roomName.trim().isEmpty()) {
+            System.err.println("Client: Cannot connect without a room name.");
+            // Optionally show an error message and exit more gracefully
+            JOptionPane.showMessageDialog(null, "Connection cancelled: No room name provided.", "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            System.exit(1);
+            return;
+        }
         try {
-            // Export this client object to make it remotely accessible for callbacks
-            clientCallbackStub = (ClientCallback) UnicastRemoteObject.exportObject(this, 0); // 0 for anonymous port
-
-            // Lookup the remote server object
+            clientCallbackStub = (ClientCallback) UnicastRemoteObject.exportObject(this, 0);
             serverStub = (WhiteboardServer) Naming.lookup(SERVER_URL);
-
-            // Register this client with the server
-            // The server will now call initializeCanvas upon successful registration
-            serverStub.registerClient(clientCallbackStub);
-
-            System.out.println("Client: Connected to server and registered.");
+            // Register with the specific room name
+            serverStub.registerClient(clientCallbackStub, roomName);
+            System.out.println("Client: Connected to server and registered for room [" + roomName + "].");
 
         } catch (Exception e) {
             System.err.println("Client connection error: " + e.toString());
             e.printStackTrace();
-            JOptionPane.showMessageDialog(frame, "Error connecting to server: " + e.getMessage(), "Connection Error",
+            JOptionPane.showMessageDialog(frame,
+                    "Error connecting to server for room '" + roomName + "': " + e.getMessage(), "Connection Error",
                     JOptionPane.ERROR_MESSAGE);
-            // Optionally exit or disable drawing features
-            shutdown(); // Clean up if connection fails
+            shutdown();
         }
     }
 
-    // --- ClientCallback Implementation ---
+    // ... ClientCallback Implementation (updateCanvas, initializeCanvas,
+    // clearCanvas) - No changes needed ...
     @Override
     public void updateCanvas(ShapeData shape) throws RemoteException {
         // This method is called by an RMI thread when a *new* shape is broadcasted.
@@ -177,7 +197,7 @@ public class WhiteboardClient implements ClientCallback {
         });
     }
 
-    // --- Drawing Panel Inner Class ---
+    // ... DrawingPanel inner class - No changes needed ...
     private class DrawingPanel extends JPanel {
         @Override
         protected void paintComponent(Graphics g) {
@@ -200,34 +220,29 @@ public class WhiteboardClient implements ClientCallback {
     // --- Mouse Listener Inner Class for Drawing ---
     private class DrawingMouseListener extends MouseAdapter implements MouseMotionListener {
 
+        // Modified to pass roomName when publishing shape
         private void handleMouseEvent(MouseEvent e) {
-            if (serverStub != null) {
+            if (serverStub != null && roomName != null) { // Check roomName too
                 double x = e.getX();
                 double y = e.getY();
-
-                // Create shape data with current attributes using the appropriate constructor
                 ShapeData shape = new ShapeData(x, y, currentColor, currentSize);
 
-                // Add locally immediately for responsiveness.
-                // The shape might be added again if server broadcasted back, but
-                // current server logic prevents that. This ensures the drawing client
-                // sees their drawing immediately.
                 shapes.add(shape);
                 drawingPanel.repaint();
 
-                // Send shape data to the server in a background thread
                 new Thread(() -> {
                     try {
-                        serverStub.publishShape(shape, clientCallbackStub);
+                        // Pass roomName when publishing
+                        serverStub.publishShape(shape, clientCallbackStub, roomName);
                     } catch (RemoteException ex) {
-                        System.err.println("Client: Error sending shape: " + ex.getMessage());
+                        System.err
+                                .println("Client: Error sending shape for room [" + roomName + "]: " + ex.getMessage());
                         SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame,
                                 "Error sending drawing data: " + ex.getMessage(), "Communication Error",
                                 JOptionPane.WARNING_MESSAGE));
-                        // If sending failed, remove the locally added shape for consistency
                         SwingUtilities.invokeLater(() -> {
-                            shapes.remove(shape); // Remove the shape we added locally
-                            drawingPanel.repaint(); // Repaint to reflect removal
+                            shapes.remove(shape);
+                            drawingPanel.repaint();
                         });
                     }
                 }).start();
@@ -249,20 +264,20 @@ public class WhiteboardClient implements ClientCallback {
         } // Not used
     }
 
-    // --- Shutdown Handling ---
+    // Modified to pass roomName during unregistration
     private void shutdown() {
         System.out.println("Client: Shutting down...");
-        // Unregister from server
-        if (serverStub != null && clientCallbackStub != null) {
+        // Unregister from server, passing roomName
+        if (serverStub != null && clientCallbackStub != null && roomName != null) {
             try {
-                serverStub.unregisterClient(clientCallbackStub);
-                System.out.println("Client: Unregistered from server.");
+                serverStub.unregisterClient(clientCallbackStub, roomName); // Pass roomName
+                System.out.println("Client: Unregistered from server room [" + roomName + "].");
             } catch (RemoteException e) {
-                System.err.println("Client: Error unregistering: " + e.getMessage());
+                System.err.println("Client: Error unregistering from room [" + roomName + "]: " + e.getMessage());
             }
         }
 
-        // Unexport the client object
+        // ... rest of shutdown logic ...
         try {
             if (clientCallbackStub != null) {
                 UnicastRemoteObject.unexportObject(this, true); // Force unexport
@@ -272,18 +287,15 @@ public class WhiteboardClient implements ClientCallback {
             System.err.println("Client: Error unexporting object: " + e.getMessage());
         }
 
-        // Close the Swing window
         if (frame != null) {
             frame.dispose();
         }
-
-        // Ensure the application exits completely
         System.exit(0);
     }
 
-    // Application entry point
+    // ... main method ...
     public static void main(String[] args) {
-        // Create and show the GUI on the Event Dispatch Thread (EDT)
+        // Prompt for room name happens inside the constructor now
         SwingUtilities.invokeLater(WhiteboardClient::new);
     }
 }

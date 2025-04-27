@@ -1,9 +1,14 @@
 package dev.daly;
 
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
 import java.rmi.Naming;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
@@ -28,6 +33,7 @@ public class WhiteboardClient implements ClientCallback {
     private JSlider sizeSlider;
     private JLabel sizeLabel;
     private JButton clearButton;
+    private JButton saveButton;
 
     // GUI Components for Room Management
     private JLabel currentRoomLabel;
@@ -91,6 +97,7 @@ public class WhiteboardClient implements ClientCallback {
         sizeSlider.setPreferredSize(new Dimension(150, sizeSlider.getPreferredSize().height));
 
         clearButton = new JButton("Clear Room");
+        saveButton = new JButton("Save Canvas");
 
         colorButton.addActionListener(e -> {
             Color chosenColor = JColorChooser.showDialog(frame, "Select Drawing Color", currentColor);
@@ -128,6 +135,9 @@ public class WhiteboardClient implements ClientCallback {
             }
         });
 
+        // Add ActionListener for the save button
+        saveButton.addActionListener(e -> saveCanvasAsImage());
+
         controlPanel.add(colorButton);
         controlPanel.add(colorPreview);
         controlPanel.add(new JLabel("   "));
@@ -135,6 +145,8 @@ public class WhiteboardClient implements ClientCallback {
         controlPanel.add(sizeLabel);
         controlPanel.add(new JLabel("   "));
         controlPanel.add(clearButton);
+        controlPanel.add(new JLabel("   "));
+        controlPanel.add(saveButton); 
         return controlPanel;
     }
 
@@ -213,7 +225,8 @@ public class WhiteboardClient implements ClientCallback {
         colorButton.setEnabled(enabled);
         sizeSlider.setEnabled(enabled);
         clearButton.setEnabled(enabled);
-        drawingPanel.setEnabled(enabled); // Enable/disable drawing panel
+        saveButton.setEnabled(enabled);
+        drawingPanel.setEnabled(enabled);
         if (enabled) {
             drawingPanel.addMouseListener(new DrawingMouseListener());
             drawingPanel.addMouseMotionListener(new DrawingMouseListener());
@@ -472,6 +485,80 @@ public class WhiteboardClient implements ClientCallback {
             frame.dispose();
         }
         System.exit(0);
+    }
+
+    // --- Method to save the canvas content as an image ---
+    private void saveCanvasAsImage() {
+        if (drawingPanel == null || !drawingPanel.isEnabled()) {
+            JOptionPane.showMessageDialog(frame, "Cannot save canvas when not in a room.", "Save Error",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Save Canvas As PNG");
+        // Set default filename suggestion
+        fileChooser.setSelectedFile(
+                new File("whiteboard_" + (currentRoomName != null ? currentRoomName : "untitled") + ".png"));
+        // Filter for PNG files
+        fileChooser.setFileFilter(new FileNameExtensionFilter("PNG Images (*.png)", "png"));
+
+        int userSelection = fileChooser.showSaveDialog(frame);
+
+        if (userSelection == JFileChooser.APPROVE_OPTION) {
+            File fileToSave = fileChooser.getSelectedFile();
+            // Ensure the file has a .png extension
+            String filePath = fileToSave.getAbsolutePath();
+            if (!filePath.toLowerCase().endsWith(".png")) {
+                fileToSave = new File(filePath + ".png");
+            }
+
+            // Check for overwrite confirmation
+            if (fileToSave.exists()) {
+                int result = JOptionPane.showConfirmDialog(frame,
+                        "The file already exists. Do you want to overwrite it?",
+                        "Confirm Overwrite", JOptionPane.YES_NO_OPTION);
+                if (result == JOptionPane.NO_OPTION) {
+                    return;
+                }
+            }
+
+            try {
+                // Create a BufferedImage of the drawing panel's size
+                int width = drawingPanel.getWidth();
+                int height = drawingPanel.getHeight();
+                // Use TYPE_INT_ARGB to support transparency if needed, otherwise TYPE_INT_RGB
+                BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+                Graphics2D g2d = image.createGraphics();
+
+                // Paint the drawing panel's content onto the BufferedImage
+                // Ensure background is painted white first
+                g2d.setColor(drawingPanel.getBackground());
+                g2d.fillRect(0, 0, width, height);
+                drawingPanel.paintComponent(g2d); // Call paintComponent to draw shapes
+                g2d.dispose(); // Release graphics resources
+
+                // Write the BufferedImage to the selected file as PNG
+                boolean success = ImageIO.write(image, "png", fileToSave);
+
+                if (success) {
+                    JOptionPane.showMessageDialog(frame, "Canvas saved successfully as:\n" + fileToSave.getName(),
+                            "Save Successful", JOptionPane.INFORMATION_MESSAGE);
+                } else {
+                    JOptionPane.showMessageDialog(frame,
+                            "Failed to save canvas.\nImageIO writer not found for PNG format.", "Save Error",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(frame, "Error saving canvas: " + ex.getMessage(), "Save Error",
+                        JOptionPane.ERROR_MESSAGE);
+                ex.printStackTrace();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(frame, "An unexpected error occurred during save: " + ex.getMessage(),
+                        "Save Error", JOptionPane.ERROR_MESSAGE);
+                ex.printStackTrace();
+            }
+        }
     }
 
     // Helper method for handling RemoteExceptions consistently

@@ -477,7 +477,7 @@ public class WhiteboardClient implements ClientCallback {
     // Helper method for handling RemoteExceptions consistently
     private void handleRemoteException(String actionDescription, RemoteException ex) {
         System.err.println("Client: Error " + actionDescription + ": " + ex.getMessage());
-        ex.printStackTrace(); // Print stack trace for debugging
+        ex.printStackTrace();
         SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(frame,
                 "Communication error while " + actionDescription + ":\n" + ex.getMessage() +
                         "\nPlease check server connection and try again.",

@@ -60,7 +60,7 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         try (Statement stmt = dbConnection.createStatement()) {
             stmt.execute(createTableSQL);
             System.out.println("Server: Shapes table checked/created.");
-            stmt.execute(createIndexSQL); // Create index
+            stmt.execute(createIndexSQL);
             System.out.println("Server: Shapes room_name index checked/created.");
         } catch (SQLException e) {
             System.err.println("Server: Error creating/checking shapes table or index: " + e.getMessage());
@@ -85,7 +85,7 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         }
         String sql = "INSERT INTO shapes (room_name, x_coord, y_coord, color_r, color_g, color_b, size) VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement pstmt = dbConnection.prepareStatement(sql)) {
-            pstmt.setString(1, roomName); // Set room name
+            pstmt.setString(1, roomName);
             pstmt.setDouble(2, shape.x);
             pstmt.setDouble(3, shape.y);
             pstmt.setInt(4, shape.colorR);
@@ -135,7 +135,7 @@ public class WhiteboardServerImpl extends UnicastRemoteObject implements Whitebo
         }
         String sql = "DELETE FROM shapes WHERE room_name = ?";
         try (PreparedStatement pstmt = dbConnection.prepareStatement(sql)) {
-            pstmt.setString(1, roomName); // Set the room name parameter
+            pstmt.setString(1, roomName);
             int deletedRows = pstmt.executeUpdate();
             System.out.println("Server: Cleared " + deletedRows + " shapes from database for room [" + roomName + "].");
         } catch (SQLException e) {
